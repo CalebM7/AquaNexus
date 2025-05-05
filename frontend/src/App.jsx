@@ -6,8 +6,8 @@ export default function App() {
   return (
     <div>
       <Navbar />
-      <Footer />
       <TrustBadges />
+      <Footer />
     </div>
   )
 }

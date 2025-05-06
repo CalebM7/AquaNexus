@@ -4,11 +4,18 @@ const express = require('express');
 const { Pool } = require('pg');
 // Securely loads credentials from .env (never commit this!).
 const dotenv = require('dotenv');
+// For password hashing
+const bcrypt = require('bcrypt');
+// For JWT authentication
+const jwt = require('jsonwebtoken');
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
+
+// Parse JSON bodies
+app.use(express.json());
 
 // PostgreSQL connection
 const pool = new Pool({
@@ -133,6 +140,63 @@ app.get('/test-db', async (req, res) => {
   } catch (err) {
     console.error('Query error:', err.stack);
     res.status(500).json({ error: 'Database query failed' });
+  }
+});
+
+// Signup endpoint
+app.post('/auth/signup', async (req, res) => {
+  const { email, password, role, name } = req.body;
+  try {
+    // Validate input
+    if (!email || !password || !role || (role === 'provider' && !name)) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    if (!['user', 'provider'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    // Hash password
+    const saltRounds = 10;
+    const password_hash = await bcrypt.hash(password, saltRounds);
+
+    // Insert user
+    const userResult = await pool.query(
+      'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id',
+      [email, password_hash, role]
+    );
+    const userId = userResult.rows[0].id;
+
+    // If provider, insert into providers table
+    if (role === 'provider') {
+      await pool.query(
+        'INSERT INTO providers (user_id, name) VALUES ($1, $2)',
+        [userId, name]
+      );
+    }
+
+    res.status(201).json({ userId, message: 'User registered successfully' });
+  } catch (err) {
+    console.error('Signup error:', err);
+    if (err.code === '23505') { // Unique violation (duplicate email)
+      return res.status(409).json({ error: 'Email already exists' });
+    }
+    res.status(500).json({ error: 'Failed to register user' });
+  }
+});
+
+// Providers endpoint
+app.get('/providers', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT p.id, p.user_id, p.name, p.service_type, p.rating, p.service_areas
+      FROM providers p
+      JOIN users u ON p.user_id = u.id
+      WHERE u.role = 'provider'
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Providers error:', err);
+    res.status(500).json({ error: 'Failed to fetch providers' });
   }
 });
 

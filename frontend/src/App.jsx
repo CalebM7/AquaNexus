@@ -1,7 +1,19 @@
-export default function App() {
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import Landing from "./pages/Landing";
+import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+
+function App() {
   return (
-    <h1 className="text-3xl font-bold text-blue-600">
-      AquaNexus Frontend Works!
-    </h1>
-  )
+    <Router>
+      <Routes>
+        <Route path="/" element={<Landing />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/dashboard" element={<div>Dashboard (TBD)</div>} />
+      </Routes>
+    </Router>
+  );
 }
+
+export default App;

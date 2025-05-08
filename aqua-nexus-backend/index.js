@@ -8,13 +8,20 @@ const dotenv = require('dotenv');
 const bcrypt = require('bcrypt');
 // For JWT authentication
 const jwt = require('jsonwebtoken');
+const cors = require('cors');
 
 dotenv.config();
 
+// Initialize Express app
 const app = express();
 const port = process.env.PORT || 5000;
 
-// Parse JSON bodies
+// Middleware
+app.use(cors({
+  origin: 'http://localhost:5173',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json());
 
 // PostgreSQL connection
@@ -49,6 +56,7 @@ const initializeDatabase = async () => {
           email VARCHAR(255) UNIQUE NOT NULL,
           password_hash TEXT NOT NULL,
           role VARCHAR(20) CHECK (role IN ('user', 'provider', 'admin')),
+          phone VARCHAR(20),  -- Added phone column
           created_at TIMESTAMP DEFAULT NOW()
         )`);
 
@@ -158,7 +166,7 @@ app.get('/test-db', async (req, res) => {
 
 // Signup endpoint
 app.post('/auth/signup', async (req, res) => {
-  const { email, password, role, name } = req.body;
+  const { email, password, role, name, phone } = req.body;
   try {
     // Validate input
     if (!email || !password || !role || (role === 'provider' && !name)) {
@@ -174,8 +182,8 @@ app.post('/auth/signup', async (req, res) => {
 
     // Insert user
     const userResult = await pool.query(
-      'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id',
-      [email, password_hash, role]
+      'INSERT INTO users (email, password_hash, role, phone) VALUES ($1, $2, $3, $4) RETURNING id',
+      [email, password_hash, role, phone]
     );
     const userId = userResult.rows[0].id;
 
@@ -187,7 +195,9 @@ app.post('/auth/signup', async (req, res) => {
       );
     }
 
-    res.status(201).json({ userId, message: 'User registered successfully' });
+    // Generate JWT token
+    const token = jwt.sign({ userId, role }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    res.status(201).json({ token, userId, role });
   } catch (err) {
     console.error('Signup error:', err);
     if (err.code === '23505') { // Unique violation (duplicate email)

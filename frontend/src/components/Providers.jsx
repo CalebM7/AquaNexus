@@ -7,6 +7,7 @@ export default function Providers() {
           Featured Service Providers
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+          {/* Provider A */}
           <div className="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200 hover:shadow-xl transition duration-300">
             <img
               src="https://placehold.co/600x400/00ACC1/white?text=Provider+A"
@@ -32,13 +33,14 @@ export default function Providers() {
               </p>
               <p className="text-lg font-semibold text-aqua-teal">Price Range: KES 50k - 500k</p>
               <a
-                href="#"
+                href="/provider/1"
                 className="mt-4 inline-block text-aqua-blue font-semibold hover:underline"
               >
                 View Profile <i className="fas fa-arrow-right ml-1 text-xs"></i>
               </a>
             </div>
           </div>
+          {/* Provider B */}
           <div className="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200 hover:shadow-xl transition duration-300">
             <img
               src="https://placehold.co/600x400/1A73E8/white?text=Provider+B"
@@ -64,13 +66,14 @@ export default function Providers() {
               </p>
               <p className="text-lg font-semibold text-aqua-teal">Price Range: KES 150k - 1M+</p>
               <a
-                href="#"
+                href="/provider/2"
                 className="mt-4 inline-block text-aqua-blue font-semibold hover:underline"
               >
                 View Profile <i className="fas fa-arrow-right ml-1 text-xs"></i>
               </a>
             </div>
           </div>
+          {/* Provider C */}
           <div className="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200 hover:shadow-xl transition duration-300">
             <img
               src="https://placehold.co/600x400/4CAF50/white?text=Provider+C"
@@ -96,7 +99,7 @@ export default function Providers() {
               </p>
               <p className="text-lg font-semibold text-aqua-teal">Price Range: KES 30k - 200k</p>
               <a
-                href="#"
+                href="/provider/3"
                 className="mt-4 inline-block text-aqua-blue font-semibold hover:underline"
               >
                 View Profile <i className="fas fa-arrow-right ml-1 text-xs"></i>
@@ -106,7 +109,7 @@ export default function Providers() {
         </div>
         <div className="text-center mt-12">
           <a
-            href="#"
+            href="/providers"
             className="bg-aqua-teal text-white px-8 py-3 rounded-md text-lg font-semibold hover:bg-opacity-90 transition duration-300 shadow-md"
           >
             See All Providers

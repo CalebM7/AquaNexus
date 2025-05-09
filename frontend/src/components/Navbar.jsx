@@ -1,10 +1,13 @@
+// src/components/Navbar.jsx
+import { Link } from "react-router-dom";
+
 export default function Navbar() {
   return (
     <header className="bg-white shadow-md sticky top-0 z-50">
       <nav className="container mx-auto px-6 py-3 flex justify-between items-center">
-        <a href="#" className="text-2xl font-bold text-blue-600">
+        <Link to="/" className="text-2xl font-bold text-blue-600">
           AquaNexus
-        </a>
+        </Link>
         <div className="space-x-4">
           <a
             href="#providers"
@@ -24,14 +27,20 @@ export default function Navbar() {
           >
             Testimonials
           </a>
-          <a
-            href="#"
+          <Link
+            to="/login"
             className="bg-teal-500 text-white px-4 py-2 rounded-md hover:bg-teal-600"
           >
             Login
-          </a>
+          </Link>
+          <Link
+            to="/signup"
+            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
+          >
+            Sign Up
+          </Link>
         </div>
       </nav>
     </header>
-  )
+  );
 }

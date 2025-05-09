@@ -326,4 +326,4 @@ app.listen(port, () => {
 });
 
 // Initialize database
-initializeDatabase();
+initializeDatabase();n  

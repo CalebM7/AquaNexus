@@ -1,48 +1,69 @@
-// src/pages/ProviderProfile.jsx
-import { useParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 
 export default function ProviderProfile() {
-  const { id } = useParams(); // Get the provider ID from the URL
+  const { id } = useParams();
+  const [provider, setProvider] = useState(null);
+  const [error, setError] = useState(null);
+  const navigate = useNavigate();
 
-  // Static data for now, matching the hardcoded providers in Providers.jsx
-  const providerData = {
-    1: {
-      name: 'Hydro Solutions Kenya',
-      rating: 4.5,
-      reviews: 25,
-      certifications: ['WRA Certified', 'Eco-Friendly'],
-      description: 'Specializes in large-scale rainwater harvesting systems.',
-      priceRange: 'KES 50k - 500k',
-      serviceType: 'Rainwater Harvesting',
-      image: 'https://placehold.co/600x400/00ACC1/white?text=Provider+A',
-    },
-    2: {
-      name: 'DeepDrill Masters',
-      rating: 4.0,
-      reviews: 18,
-      certifications: ['NEMA Approved', 'Borehole Expert'],
-      description: 'Expert borehole drilling and pump installation services.',
-      priceRange: 'KES 150k - 1M+',
-      serviceType: 'Borehole Drilling',
-      image: 'https://placehold.co/600x400/1A73E8/white?text=Provider+B',
-    },
-    3: {
-      name: 'AquaHarvest Systems',
-      rating: 5.0,
-      reviews: 30,
-      certifications: ['WRA Certified', 'Rainwater Pro'],
-      description: 'Affordable rainwater solutions for homes and farms.',
-      priceRange: 'KES 30k - 200k',
-      serviceType: 'Rainwater Harvesting',
-      image: 'https://placehold.co/600x400/4CAF50/white?text=Provider+C',
-    },
+  const refreshToken = async () => {
+    try {
+      const refreshToken = localStorage.getItem('refreshToken');
+      if (!refreshToken) {
+        throw new Error('No refresh token');
+      }
+      const response = await fetch('http://localhost:5000/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!response.ok) throw new Error('Failed to refresh token');
+      const data = await response.json();
+      localStorage.setItem('accessToken', data.accessToken);
+      return data.accessToken;
+    } catch (err) {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      navigate('/login');
+      return null;
+    }
   };
 
-  const provider = providerData[id] || { name: 'Provider Not Found' };
+  useEffect(() => {
+    const fetchProvider = async () => {
+      try {
+        let token = localStorage.getItem('accessToken');
+        if (!token) {
+          navigate('/login');
+          return;
+        }
+        let response = await fetch(`http://localhost:5000/api/provider/${id}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        if (response.status === 403 || response.status === 401) {
+          token = await refreshToken();
+          if (!token) return;
+          response = await fetch(`http://localhost:5000/api/provider/${id}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+        }
+        if (!response.ok) throw new Error('Failed to fetch provider');
+        const data = await response.json();
+        setProvider(data);
+      } catch (err) {
+        setError(err.message);
+      }
+    };
+    fetchProvider();
+  }, [id, navigate]);
 
-  if (!providerData[id]) {
-    return <div className="text-center mt-8 text-red-500">Provider Not Found</div>;
-  }
+  if (error) return <div className="text-center mt-8 text-red-500">{error}</div>;
+  if (!provider) return <div className="text-center mt-8">Loading...</div>;
 
   return (
     <section className="py-16 md:py-24 bg-white">
@@ -51,19 +72,17 @@ export default function ProviderProfile() {
           {provider.name}
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {/* Provider Image */}
           <div className="md:col-span-1">
             <img
-              src={provider.image}
+              src={provider.image || 'https://placehold.co/600x400'}
               alt={provider.name}
               className="w-full h-64 object-cover rounded-lg shadow-md"
             />
           </div>
-          {/* Provider Details */}
           <div className="md:col-span-2">
             <div className="flex items-center mb-4 star-rating">
               {[...Array(5)].map((_, index) => {
-                const rating = provider.rating || 0;
+                const rating = parseFloat(provider.rating) || 0;
                 if (index + 1 <= Math.floor(rating)) {
                   return <i key={index} className="fas fa-star text-yellow-400"></i>;
                 } else if (index < rating && rating % 1 >= 0.5) {
@@ -73,28 +92,36 @@ export default function ProviderProfile() {
                 }
               })}
               <span className="text-gray-600 text-sm ml-2">
-                ({provider.rating} stars | {provider.reviews} Reviews)
+                ({provider.rating} stars | {provider.reviews || 0} Reviews)
               </span>
             </div>
-            <div className="mb-4 space-x-2">
-              {provider.certifications.map((cert) => (
+            <div className="mb-4 space-x-　　　　 2">
+              {provider.certifications?.map((cert) => (
                 <span
                   key={cert}
                   className={`badge ${
-                    cert.includes('Eco-Friendly') || cert.includes('Rainwater Pro')
+                    cert.toLowerCase().includes('eco-friendly') || cert.toLowerCase().includes('rainwater')
                       ? 'bg-aqua-green text-white'
                       : 'bg-aqua-blue text-white'
                   }`}
                 >
-                  {cert}
+                  {cert.toUpperCase()}
                 </span>
               ))}
             </div>
-            <p className="text-gray-600 mb-4">{provider.description}</p>
+            <p className="text-gray-600 mb-4">{provider.description || 'No description available'}</p>
             <p className="text-lg font-semibold text-aqua-teal mb-4">
-              Price Range: {provider.priceRange}
+              Service Type: {provider.service_type || 'N/A'}
             </p>
-            <p className="text-gray-600 mb-4">Service Type: {provider.serviceType}</p>
+            <p className="text-lg font-semibold text-aqua-teal mb-4">
+              Price Range: KES {provider.price_range_min?.toLocaleString() || 'N/A'} - {provider.price_range_max?.toLocaleString() || 'N/A'}
+            </p>
+            <p className="text-gray-600 mb-4">
+              Service Areas: {provider.service_areas?.join(', ') || 'N/A'}
+            </p>
+            <p className="text-gray-600 mb-4">
+              Services: {provider.services?.join(', ') || 'N/A'}
+            </p>
             <button className="bg-aqua-teal text-white px-6 py-2 rounded-md font-semibold hover:bg-opacity-90 transition duration-300">
               Contact Provider
             </button>

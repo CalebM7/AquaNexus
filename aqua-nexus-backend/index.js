@@ -1,4 +1,3 @@
-// backend/index.js
 const express = require('express');
 const { Pool } = require('pg');
 const dotenv = require('dotenv');
@@ -21,32 +20,26 @@ const pool = new Pool({
   idleTimeoutMillis: 30000,
 });
 
-// JWT verification middleware
+// Middleware to verify JWT token
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  if (!authHeader) {
-    console.log('No Authorization header provided');
-    return res.status(401).json({ message: 'No token provided' });
-  }
-
-  const token = authHeader.split(' ')[1];
+  const token = authHeader?.split(' ')[1];
   if (!token) {
-    console.log('Authorization header format invalid');
-    return res.status(401).json({ message: 'No token provided' });
+    console.log('No token provided');
+    return res.status(401).json({ error: 'No token provided' });
   }
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      console.error('Token verification failed:', err.message);
+      return res.status(403).json({ error: 'Invalid token' });
+    }
     console.log('Token verified, user:', decoded);
     req.user = decoded;
     next();
-  } catch (err) {
-    console.error('Token verification failed:', err.message);
-    res.status(401).json({ message: 'Invalid token', error: err.message });
-  }
+  });
 };
 
-// Initialize database
+// Async function to initialize database
 const initializeDatabase = async () => {
   const maxRetries = 3;
   let attempt = 1;
@@ -84,7 +77,7 @@ const initializeDatabase = async () => {
           budget NUMERIC,
           created_at TIMESTAMP DEFAULT NOW()
         )`);
-      console.log('✅ Projects table created');
+      console.log('✅ Projects'év table created');
 
       console.log('Creating bids table...');
       await pool.query(`
@@ -112,6 +105,11 @@ const initializeDatabase = async () => {
           service_type VARCHAR(50) CHECK (service_type IN ('rwh', 'borehole')),
           license_number VARCHAR(100),
           service_areas TEXT[],
+          description TEXT,
+          image TEXT,
+          price_range_min INTEGER,
+          price_range_max INTEGER,
+          reviews INTEGER DEFAULT 0,
           UNIQUE(user_id)
         )`);
       console.log('✅ Providers table created');
@@ -151,8 +149,19 @@ const initializeDatabase = async () => {
         )`);
       console.log('✅ Messages table created');
 
-      console.log('✅ Database initialization completed successfully');
-      break;
+      console.log('Creating refresh_tokens table');
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS refresh_tokens (
+          id SERIAL PRIMARY KEY,
+          user_id INT REFERENCES users(id),
+          token TEXT NOT NULL,
+          expires_at TIMESTAMP NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW(),
+          UNIQUE(user_id, token)
+        )`);
+
+      console.log('✅ Tables created successfully');
+      break; // Exit loop on success
     } catch (err) {
       console.error(`❌ Attempt ${attempt} failed:`, err.message);
       if (attempt === maxRetries) {
@@ -175,10 +184,10 @@ app.get('/', (req, res) => {
 app.get('/api/test-db', async (req, res) => {
   try {
     const result = await pool.query('SELECT NOW()');
-    res.json({ time: result.rows[0].now });
+    res.json({ message: 'Database connected', time: result.rows[0].now });
   } catch (err) {
-    console.error('Query error:', err.message);
-    res.status(500).json({ error: 'Database query failed', details: err.message });
+    console.error('Database query error:', err.stack);
+    res.status(500).json({ error: 'Database connection failed' });
   }
 });
 
@@ -205,12 +214,22 @@ app.post('/api/auth/register', async (req, res) => {
     if (role === 'provider') {
       await pool.query(
         'INSERT INTO providers (user_id, name, service_type) VALUES ($1, $2, $3)',
-        [userId, name, role === 'provider' ? 'rwh' : null] // Default service_type for providers
+        [userId, name, role === 'provider' ? 'rwh' : null]
       );
     }
 
-    const token = jwt.sign({ userId, role }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    res.status(201).json({ token, userId, role });
+    // Generate tokens
+    const accessToken = jwt.sign({ userId, role }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const refreshToken = jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    // Store refresh token
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await pool.query(
+      'INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+      [userId, refreshToken, expiresAt]
+    );
+
+    res.status(201).json({ accessToken, refreshToken, userId, role });
   } catch (err) {
     console.error('Register error:', err.message);
     if (err.code === '23505') {
@@ -236,11 +255,72 @@ app.post('/api/auth/login', async (req, res) => {
     if (!match) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const token = jwt.sign({ userId: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    res.json({ token, userId: user.id, role: user.role });
+    const accessToken = jwt.sign({ userId: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const refreshToken = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    // Store refresh token
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await pool.query(
+      'INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+      [user.id, refreshToken, expiresAt]
+    );
+
+    res.json({ accessToken, refreshToken, userId: user.id, role: user.role });
   } catch (err) {
     console.error('Login error:', err.message);
     res.status(500).json({ error: 'Failed to login', details: err.message });
+  }
+});
+
+// Refresh token endpoint
+app.post('/api/auth/refresh', async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    return res.status(401).json({ error: 'No refresh token provided' });
+  }
+  try {
+    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+    const userId = decoded.userId;
+
+    const tokenResult = await pool.query(
+      'SELECT * FROM refresh_tokens WHERE user_id = $1 AND token = $2 AND expires_at > NOW()',
+      [userId, refreshToken]
+    );
+    if (tokenResult.rows.length === 0) {
+      return res.status(403).json({ error: 'Invalid or expired refresh token' });
+    }
+
+    const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+    const user = userResult.rows[0];
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    const newAccessToken = jwt.sign(
+      { userId: user.id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    res.json({ accessToken: newAccessToken });
+  } catch (err) {
+    console.error('Refresh token error:', err);
+    res.status(403).json({ error: 'Invalid refresh token' });
+  }
+});
+
+// Logout endpoint
+app.post('/api/auth/logout', verifyToken, async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    return res.status(400).json({ error: 'No refresh token provided' });
+  }
+  try {
+    await pool.query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
+    res.json({ message: 'Logged out successfully' });
+  } catch (err) {
+    console.error('Logout error:', err);
+    res.status(500).json({ error: 'Failed to logout' });
   }
 });
 
@@ -248,17 +328,15 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/providers', verifyToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT p.id, p.user_id, p.name, p.service_type, p.rating, p.service_areas, p.certifications, p.services,
-             ST_X(p.location) AS longitude, ST_Y(p.location) AS latitude
+      SELECT p.*
       FROM providers p
       JOIN users u ON p.user_id = u.id
       WHERE u.role = 'provider'
     `);
-    console.log('Providers fetched:', result.rows); // Debug log
     res.json(result.rows);
   } catch (err) {
-    console.error('Providers error:', err.message);
-    res.status(500).json({ error: 'Failed to fetch providers', details: err.message });
+    console.error('Providers error:', err.stack);
+    res.status(500).json({ error: 'Failed to fetch providers' });
   }
 });
 
@@ -267,8 +345,7 @@ app.get('/api/provider/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(`
-      SELECT p.id, p.user_id, p.name, p.service_type, p.rating, p.service_areas, p.certifications, p.services,
-             ST_X(p.location) AS longitude, ST_Y(p.location) AS latitude
+      SELECT p.*
       FROM providers p
       JOIN users u ON p.user_id = u.id
       WHERE p.id = $1 AND u.role = 'provider'
@@ -278,8 +355,8 @@ app.get('/api/provider/:id', verifyToken, async (req, res) => {
     }
     res.json(result.rows[0]);
   } catch (err) {
-    console.error('Provider error:', err.message);
-    res.status(500).json({ error: 'Failed to fetch provider', details: err.message });
+    console.error('Provider error:', err.stack);
+    res.status(500).json({ error: 'Failed to fetch provider' });
   }
 });
 
@@ -326,4 +403,4 @@ app.listen(port, () => {
 });
 
 // Initialize database
-initializeDatabase();n  
+initializeDatabase();

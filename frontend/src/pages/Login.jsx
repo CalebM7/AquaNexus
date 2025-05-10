@@ -16,8 +16,9 @@ const Login = () => {
         email,
         password,
       });
-      localStorage.setItem("token", response.data.token);
-      navigate("/dashboard");
+      localStorage.setItem("accessToken", response.data.accessToken);
+      localStorage.setItem("refreshToken", response.data.refreshToken);
+      navigate("/"); // Redirect to home page (Featured Providers)
     } catch (err) {
       setError(err.response?.data?.error || "Login failed");
     }

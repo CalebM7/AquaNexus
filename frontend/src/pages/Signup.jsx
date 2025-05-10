@@ -26,17 +26,28 @@ const Signup = () => {
       return;
     }
     try {
+      // Format phone number with country code
+      const formattedPhone = formData.phone.startsWith('+254')
+        ? formData.phone
+        : `+254${formData.phone.replace(/\s/g, '')}`; // Remove spaces and add +254 if not present
+
       const response = await axios.post("http://localhost:5000/auth/signup", {
         name: formData.fullname,
         email: formData.email,
-        phone: formData.phone,
+        phone: formattedPhone,
         password: formData.password,
         role,
       });
-      localStorage.setItem("token", response.data.token);
-      navigate("/dashboard");
+      localStorage.setItem("accessToken", response.data.accessToken);
+      localStorage.setItem("refreshToken", response.data.refreshToken);
+      navigate("/"); // Redirect to landing page
     } catch (err) {
-      setError(err.response?.data?.error || "Signup failed");
+      const errorMessage = err.response?.data?.error || "Signup failed";
+      if (err.response?.status === 409) {
+        setError("Email already exists. Please use a different email.");
+      } else {
+        setError(errorMessage);
+      }
     }
   };
 
@@ -123,6 +134,7 @@ const Signup = () => {
                   onChange={handleChange}
                   className="w-full px-3 py-2.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-aqua-blue focus:border-transparent sm:text-sm"
                   placeholder="7XX XXX XXX"
+                  pattern="[0-9\s]{9,12}" // Basic validation for Kenyan phone numbers
                 />
               </div>
               <div className="input-with-icon password-input">

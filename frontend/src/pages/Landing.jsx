@@ -1,20 +1,20 @@
 // src/pages/Landing.jsx
-import Navbar from '../components/Navbar';
 import Hero from '../components/Hero';
 import HowItWorks from '../components/HowItWorks';
 import TrustBadges from '../components/TrustBadges';
-import Providers from '../components/Providers';
+import FeaturedProviders from '../components/FeaturedProviders';
 import Testimonials from '../components/Testimonials';
 import Footer from '../components/Footer';
+import Navbar from '../components/Navbar';
 
 export default function Landing() {
   return (
     <div>
-      <Navbar />
+      
       <Hero />
       <HowItWorks />
       <TrustBadges />
-      <Providers />
+      <FeaturedProviders />
       <Testimonials />
       <Footer />
     </div>

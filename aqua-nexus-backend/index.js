@@ -32,6 +32,21 @@ const pool = new Pool({
   idleTimeoutMillis: 30000 // 30 seconds
 });
 
+// Middleware to verify JWT token
+const verifyToken = (req, res, next) => {
+  const token = req.headers['authorization']?.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid token' });
+    }
+    req.user = decoded;
+    next();
+  });
+};
+
 // Async function to initialize database
 const initializeDatabase = async () => {
   const maxRetries = 3;
@@ -56,7 +71,7 @@ const initializeDatabase = async () => {
           email VARCHAR(255) UNIQUE NOT NULL,
           password_hash TEXT NOT NULL,
           role VARCHAR(20) CHECK (role IN ('user', 'provider', 'admin')),
-          phone VARCHAR(20),  -- Added phone column
+          phone VARCHAR(20),
           created_at TIMESTAMP DEFAULT NOW()
         )`);
 
@@ -98,6 +113,11 @@ const initializeDatabase = async () => {
           service_type VARCHAR(50) CHECK (service_type IN ('rwh', 'borehole')),
           license_number VARCHAR(100),
           service_areas TEXT[],
+          description TEXT,
+          image TEXT,
+          price_range_min INTEGER,
+          price_range_max INTEGER,
+          reviews INTEGER DEFAULT 0,
           UNIQUE(user_id)
         )`);
 
@@ -133,6 +153,17 @@ const initializeDatabase = async () => {
           created_at TIMESTAMP DEFAULT NOW()
         )`);
 
+      console.log('Creating refresh_tokens table');
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS refresh_tokens (
+          id SERIAL PRIMARY KEY,
+          user_id INT REFERENCES users(id),
+          token TEXT NOT NULL,
+          expires_at TIMESTAMP NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW(),
+          UNIQUE(user_id, token)
+        )`);
+
       console.log('✅ Tables created successfully');
       break; // Exit loop on success
     } catch (err) {
@@ -154,13 +185,13 @@ app.get('/', (req, res) => {
 });
 
 // Test database route
-app.get('/test-db', async (req, res) => {
+app.get('/api/test-db', async (req, res) => {
   try {
     const result = await pool.query('SELECT NOW()');
-    res.json({ time: result.rows[0].now });
+    res.json({ message: 'Database connected', time: result.rows[0].now });
   } catch (err) {
-    console.error('Query error:', err.stack);
-    res.status(500).json({ error: 'Database query failed' });
+    console.error('Database query error:', err.stack);
+    res.status(500).json({ error: 'Database connection failed' });
   }
 });
 
@@ -196,8 +227,19 @@ app.post('/auth/signup', async (req, res) => {
     }
 
     // Generate JWT token
-    const token = jwt.sign({ userId, role }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    res.status(201).json({ token, userId, role });
+    const accessToken = jwt.sign({ userId, role }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const refreshToken = jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    // Calculate expiry date for refresh token (7 days from now)
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    // Store refresh token in the database
+    await pool.query(
+      'INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+      [userId, refreshToken, expiresAt]
+    );
+
+    res.status(201).json({ accessToken, refreshToken, userId, role });
   } catch (err) {
     console.error('Signup error:', err);
     if (err.code === '23505') { // Unique violation (duplicate email)
@@ -207,22 +249,7 @@ app.post('/auth/signup', async (req, res) => {
   }
 });
 
-// Providers endpoint
-app.get('/providers', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT p.id, p.user_id, p.name, p.service_type, p.rating, p.service_areas
-      FROM providers p
-      JOIN users u ON p.user_id = u.id
-      WHERE u.role = 'provider'
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Providers error:', err);
-    res.status(500).json({ error: 'Failed to fetch providers' });
-  }
-});
-
+// Login endpoint
 app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -238,19 +265,107 @@ app.post('/auth/login', async (req, res) => {
     if (!match) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const token = jwt.sign({ userId: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    res.json({ token, userId: user.id, role: user.role });
+    const accessToken = jwt.sign({ userId: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const refreshToken = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    // Calculate expiry date for refresh token (7 days from now)
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    // Store refresh token in the database
+    await pool.query(
+      'INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+      [user.id, refreshToken, expiresAt]
+    );
+
+    res.json({ accessToken, refreshToken, userId: user.id, role: user.role });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Failed to login' });
   }
 });
 
-app.get('/provider/:id', async (req, res) => {
+// Refresh token endpoint
+app.post('/auth/refresh', async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    return res.status(401).json({ error: 'No refresh token provided' });
+  }
+  try {
+    // Verify refresh token
+    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+    const userId = decoded.userId;
+
+    // Check if refresh token exists in the database and is valid
+    const tokenResult = await pool.query(
+      'SELECT * FROM refresh_tokens WHERE user_id = $1 AND token = $2 AND expires_at > NOW()',
+      [userId, refreshToken]
+    );
+    if (tokenResult.rows.length === 0) {
+      return res.status(403).json({ error: 'Invalid or expired refresh token' });
+    }
+
+    // Fetch user
+    const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+    const user = userResult.rows[0];
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    // Generate new access token
+    const newAccessToken = jwt.sign(
+      { userId: user.id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    res.json({ accessToken: newAccessToken });
+  } catch (err) {
+    console.error('Refresh token error:', err);
+    res.status(403).json({ error: 'Invalid refresh token' });
+  }
+});
+
+// Logout endpoint (optional: to invalidate refresh token)
+app.post('/auth/logout', verifyToken, async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    return res.status(400).json({ error: 'No refresh token provided' });
+  }
+  try {
+    // Delete the refresh token from the database
+    await pool.query(
+      'DELETE FROM refresh_tokens WHERE token = $1',
+      [refreshToken]
+    );
+    res.json({ message: 'Logged out successfully' });
+  } catch (err) {
+    console.error('Logout error:', err);
+    res.status(500).json({ error: 'Failed to logout' });
+  }
+});
+
+// Providers endpoint
+app.get('/providers', verifyToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT p.*
+      FROM providers p
+      JOIN users u ON p.user_id = u.id
+      WHERE u.role = 'provider'
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Providers error:', err.stack);
+    res.status(500).json({ error: 'Failed to fetch providers' });
+  }
+});
+
+// Provider by ID endpoint
+app.get('/provider/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(`
-      SELECT p.id, p.user_id, p.name, p.service_type, p.rating, p.service_areas, p.certifications, p.services
+      SELECT p.*
       FROM providers p
       JOIN users u ON p.user_id = u.id
       WHERE p.id = $1 AND u.role = 'provider'
@@ -260,7 +375,7 @@ app.get('/provider/:id', async (req, res) => {
     }
     res.json(result.rows[0]);
   } catch (err) {
-    console.error('Provider error:', err);
+    console.error('Provider error:', err.stack);
     res.status(500).json({ error: 'Failed to fetch provider' });
   }
 });

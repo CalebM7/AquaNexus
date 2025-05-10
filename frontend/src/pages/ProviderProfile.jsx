@@ -13,7 +13,7 @@ export default function ProviderProfile() {
       if (!refreshToken) {
         throw new Error('No refresh token');
       }
-      const response = await fetch('http://localhost:5000/api/auth/refresh', {
+      const response = await fetch('http://localhost:5000/auth/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
@@ -38,7 +38,7 @@ export default function ProviderProfile() {
           navigate('/login');
           return;
         }
-        let response = await fetch(`http://localhost:5000/api/provider/${id}`, {
+        let response = await fetch(`http://localhost:5000/provider/${id}`, {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -46,7 +46,7 @@ export default function ProviderProfile() {
         if (response.status === 403 || response.status === 401) {
           token = await refreshToken();
           if (!token) return;
-          response = await fetch(`http://localhost:5000/api/provider/${id}`, {
+          response = await fetch(`http://localhost:5000/provider/${id}`, {
             headers: {
               'Authorization': `Bearer ${token}`,
             },
@@ -95,7 +95,7 @@ export default function ProviderProfile() {
                 ({provider.rating} stars | {provider.reviews || 0} Reviews)
               </span>
             </div>
-            <div className="mb-4 space-x-　　　　 2">
+            <div className="mb-4 space-x-2">
               {provider.certifications?.map((cert) => (
                 <span
                   key={cert}
@@ -114,7 +114,7 @@ export default function ProviderProfile() {
               Service Type: {provider.service_type || 'N/A'}
             </p>
             <p className="text-lg font-semibold text-aqua-teal mb-4">
-              Price Range: KES {provider.price_range_min?.toLocaleString() || 'N/A'} - {provider.price_range_max?.toLocaleString() || 'N/A'}
+              Price Range: KES {provider.price_range_min?.toLocaleString()} - {provider.price_range_max?.toLocaleString()}
             </p>
             <p className="text-gray-600 mb-4">
               Service Areas: {provider.service_areas?.join(', ') || 'N/A'}
